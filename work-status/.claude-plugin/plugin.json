@@ -1,0 +1,9 @@
+{
+  "name": "work-status",
+  "version": "0.1.0",
+  "description": "使用スキル・サブエージェント・モデル・経過時間をパネルでひと目で表示",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "hptukurou0101"
+  }
+}
