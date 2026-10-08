@@ -10,6 +10,7 @@ const skills = atom({ plugin: 'work-status', key: 'skills' } as const, [])
 const agents = atom({ plugin: 'work-status', key: 'agents' } as const, [])
 const sessionStartedAt = atom({ plugin: 'work-status', key: 'sessionStartedAt' } as const, 0)
 const turnStartedAt = atom({ plugin: 'work-status', key: 'turnStartedAt' } as const, null)
+const tokens = atom({ plugin: 'work-status', key: 'tokens' } as const, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
 
 // claude-opus-5-5 → Opus 5.5
 export const modelLabel = (id: string): string => {
@@ -19,6 +20,35 @@ export const modelLabel = (id: string): string => {
   const name = family.charAt(0).toUpperCase() + family.slice(1).toLowerCase()
   return m[3] ? `${name} ${m[2]}.${m[3]}` : `${name} ${m[2]}`
 }
+
+// 1234567 → 123.5万
+export const tokenLabel = (n: number): string => {
+  if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(1)}億`
+  if (n >= 10_000) return `${(n / 10_000).toFixed(1)}万`
+  return n.toLocaleString('en-US')
+}
+
+// 1.234 → $1.23
+export const usdLabel = (usd: number): string => `$${usd < 0.01 && usd > 0 ? usd.toFixed(3) : usd.toFixed(2)}`
+
+const LIMIT_NAMES: Record<string, string> = {
+  five_hour: '5時間',
+  seven_day: '1週間',
+  seven_day_opus: '1週間（Opus）',
+  seven_day_sonnet: '1週間（Sonnet）',
+  spend_limit: '利用上限',
+}
+
+// 2026-10-08T06:00:00Z → 10/8 15:00
+export const resetLabel = (iso: string | undefined): string => {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const hm = `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
+  return `${d.getMonth() + 1}/${d.getDate()} ${hm} に回復`
+}
+
+export const limitLabel = (kind: string): string => LIMIT_NAMES[kind] ?? kind
 
 // 65000 → 1分5秒
 export const duration = (ms: number): string => {
@@ -37,7 +67,7 @@ export const register: Register = on => {
     await update($, sessionStartedAt, v => v || now)
     await $.command.register({
       name: 'work-status',
-      description: '作業状況パネル（スキル・サブエージェント・モデル・経過時間）を開く',
+      description: '作業状況パネル（スキル・サブエージェント・モデル・経過時間・使用量）を開く',
     })
     void $.ui.open({ id: PANE, title: TITLE })
     // 経過時間を1秒ごとに描き直す
@@ -86,6 +116,16 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     const now = await $.clock.now()
+    // サブエージェントの分も含めてセッションの合計に足す
+    const u = e.usage
+    if (u) {
+      await update($, tokens, t => ({
+        input: t.input + u.input_tokens,
+        output: t.output + u.output_tokens,
+        cacheRead: t.cacheRead + u.cache_read_input_tokens,
+        cacheWrite: t.cacheWrite + u.cache_creation_input_tokens,
+      }))
+    }
     if (e.agentId) {
       await update($, agents, list =>
         list.map(a => (a.id === e.agentId && a.endedAt === null ? { ...a, endedAt: now } : a)),
@@ -105,6 +145,9 @@ export const register: Register = on => {
     const agentList = await read($, agents)
     const startedAt = await read($, sessionStartedAt)
     const turnAt = await read($, turnStartedAt)
+    const tok = await read($, tokens)
+    const usage = await $.session.usage()
+    const ctx = usage.context
     const running = agentList.filter(a => a.endedAt === null)
     const finished = agentList.filter(a => a.endedAt !== null).slice(0, 5)
 
@@ -131,6 +174,22 @@ export const register: Register = on => {
         <Text bold>⏱ 経過時間</Text>
         <Text>  今の作業：{turnAt === null ? <Text dimColor>待機中</Text> : duration(now - turnAt)}</Text>
         <Text>  セッション：{duration(now - (startedAt || now))}</Text>
+        <Text> </Text>
+        <Text bold>📊 使用量</Text>
+        <Text>
+          {'  '}コンテキスト：{ctx.percent === undefined ? <Text dimColor>まだありません</Text> : `${ctx.percent}%`}
+          {ctx.tokens !== undefined && <Text dimColor>（{tokenLabel(ctx.tokens)} / {tokenLabel(ctx.window)}）</Text>}
+        </Text>
+        <Text>  トークン：入力 {tokenLabel(tok.input + tok.cacheWrite)}・出力 {tokenLabel(tok.output)}</Text>
+        <Text dimColor>    キャッシュ読み込み {tokenLabel(tok.cacheRead)}</Text>
+        {usage.cost && <Text>  料金の目安（API 換算）：{usdLabel(usage.cost.usd)}</Text>}
+        {usage.rateLimits.length > 0 && <Text>  利用枠</Text>}
+        {usage.rateLimits.map(r => (
+          <Text>
+            {'    '}{limitLabel(r.kind)}：<Text color={r.percentUsed >= 90 ? 'red' : r.percentUsed >= 70 ? 'yellow' : undefined}>{r.percentUsed}%</Text>
+            {r.resetsAt && <Text dimColor>（{resetLabel(r.resetsAt)}）</Text>}
+          </Text>
+        ))}
       </Box>
     )
   })

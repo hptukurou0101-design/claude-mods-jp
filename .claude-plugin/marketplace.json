@@ -2,7 +2,7 @@
   "name": "claude-mods-jp",
   "owner": { "name": "hptukurou0101" },
   "plugins": [
-    { "name": "work-status", "source": "./work-status", "description": "使用スキル・サブエージェント・モデル・経過時間をパネルでひと目で表示" },
+    { "name": "work-status", "source": "./work-status", "description": "使用スキル・サブエージェント・モデル・経過時間・使用量をパネルでひと目で表示" },
     { "name": "jp-display", "source": "./jp-display", "description": "スピナーや操作ヒントなど Claude Code の英語表示を日本語にする" }
   ]
 }

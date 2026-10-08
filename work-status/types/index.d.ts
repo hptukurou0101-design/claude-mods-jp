@@ -8,6 +8,8 @@ export type AgentRun = {
   endedAt: number | null
 }
 
+export type TokenTotals = { input: number; output: number; cacheRead: number; cacheWrite: number }
+
 declare module 'claude-code' {
   interface PluginState {
     'work-status': {
@@ -15,6 +17,7 @@ declare module 'claude-code' {
       agents: AgentRun[]
       sessionStartedAt: number
       turnStartedAt: number | null
+      tokens: TokenTotals
     }
   }
 }
