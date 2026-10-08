@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentRun, SkillUse } from '../types'
+import type { AgentRun, SkillUse, UsdJpy } from '../types'
 
 const PANE = 'work-status'
 const TITLE = '作業状況'
@@ -11,6 +11,12 @@ const agents = atom({ plugin: 'work-status', key: 'agents' } as const, [])
 const sessionStartedAt = atom({ plugin: 'work-status', key: 'sessionStartedAt' } as const, 0)
 const turnStartedAt = atom({ plugin: 'work-status', key: 'turnStartedAt' } as const, null)
 const tokens = atom({ plugin: 'work-status', key: 'tokens' } as const, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+const usdJpy = atom({ plugin: 'work-status', key: 'usdJpy' } as const, null)
+
+// 欧州中央銀行の参照レート（平日1回更新・鍵不要）
+const RATE_URL = 'https://api.frankfurter.dev/v1/latest?base=USD&symbols=JPY'
+const RATE_STORE_KEY = 'usdJpy'
+const RATE_MAX_AGE = 24 * 60 * 60 * 1000
 
 // claude-opus-5-5 → Opus 5.5
 export const modelLabel = (id: string): string => {
@@ -30,6 +36,25 @@ export const tokenLabel = (n: number): string => {
 
 // 1.234 → $1.23
 export const usdLabel = (usd: number): string => `$${usd < 0.01 && usd > 0 ? usd.toFixed(3) : usd.toFixed(2)}`
+
+// 0.54, 158.23 → 約85円
+export const jpyLabel = (usd: number, rate: number): string => {
+  const yen = usd * rate
+  if (yen > 0 && yen < 1) return '1円未満'
+  return `約${Math.round(yen).toLocaleString('en-US')}円`
+}
+
+// {"base":"USD","date":"2026-10-07","rates":{"JPY":158.23}} → { rate, date }
+export const parseRate = (text: string): { rate: number; date: string } | null => {
+  try {
+    const body = JSON.parse(text) as { date?: unknown; rates?: { JPY?: unknown } }
+    const rate = body.rates?.JPY
+    if (typeof rate !== 'number' || !(rate > 0) || typeof body.date !== 'string') return null
+    return { rate, date: body.date }
+  } catch {
+    return null
+  }
+}
 
 const LIMIT_NAMES: Record<string, string> = {
   five_hour: '5時間',
@@ -61,7 +86,26 @@ export const duration = (ms: number): string => {
   return `${sec}秒`
 }
 
+// 保存済みのレートを読み、24時間より古ければ取り直す。取れなければ円は出さない
+async function refreshRate($: EngineInterface): Promise<void> {
+  const now = await $.clock.now()
+  const saved = (await $.store.get(RATE_STORE_KEY)) as UsdJpy | undefined
+  if (saved) await update($, usdJpy, () => saved)
+  if (saved && now - saved.fetchedAt < RATE_MAX_AGE) return
+  try {
+    const res = await $.http.fetch(RATE_URL)
+    const parsed = res.ok ? parseRate(res.text) : null
+    if (!parsed) return
+    const fresh: UsdJpy = { ...parsed, fetchedAt: now }
+    await $.store.set(RATE_STORE_KEY, fresh)
+    await update($, usdJpy, () => fresh)
+  } catch {
+    // 通信できないときは前回のレート（なければドルだけ）で表示を続ける
+  }
+}
+
 export const register: Register = on => {
+
   on('session.start', async ($, e, next) => {
     const now = await $.clock.now()
     await update($, sessionStartedAt, v => v || now)
@@ -72,6 +116,8 @@ export const register: Register = on => {
     void $.ui.open({ id: PANE, title: TITLE })
     // 経過時間を1秒ごとに描き直す
     $.clock.every(1000, () => $.ui.invalidate('ui.render'))
+    void refreshRate($)
+    $.clock.every(60 * 60 * 1000, () => void refreshRate($))
 
     return next(e)
   })
@@ -146,6 +192,7 @@ export const register: Register = on => {
     const startedAt = await read($, sessionStartedAt)
     const turnAt = await read($, turnStartedAt)
     const tok = await read($, tokens)
+    const fx = await read($, usdJpy)
     const usage = await $.session.usage()
     const ctx = usage.context
     const running = agentList.filter(a => a.endedAt === null)
@@ -182,7 +229,12 @@ export const register: Register = on => {
         </Text>
         <Text>  トークン：入力 {tokenLabel(tok.input + tok.cacheWrite)}・出力 {tokenLabel(tok.output)}</Text>
         <Text dimColor>    キャッシュ読み込み {tokenLabel(tok.cacheRead)}</Text>
-        {usage.cost && <Text>  料金の目安（API 換算）：{usdLabel(usage.cost.usd)}</Text>}
+        {usage.cost && (
+          <Text>
+            {'  '}料金の目安（API 換算）：{usdLabel(usage.cost.usd)}
+            {fx && <Text>（{jpyLabel(usage.cost.usd, fx.rate)}）</Text>}
+          </Text>
+        )}
         {usage.rateLimits.length > 0 && <Text>  利用枠</Text>}
         {usage.rateLimits.map(r => (
           <Text>

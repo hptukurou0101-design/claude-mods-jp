@@ -8,6 +8,8 @@ export type AgentRun = {
   endedAt: number | null
 }
 
+export type UsdJpy = { rate: number; date: string; fetchedAt: number }
+
 export type TokenTotals = { input: number; output: number; cacheRead: number; cacheWrite: number }
 
 declare module 'claude-code' {
@@ -18,6 +20,7 @@ declare module 'claude-code' {
       sessionStartedAt: number
       turnStartedAt: number | null
       tokens: TokenTotals
+      usdJpy: UsdJpy | null
     }
   }
 }

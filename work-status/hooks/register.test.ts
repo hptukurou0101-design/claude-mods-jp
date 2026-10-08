@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { duration, limitLabel, modelLabel, tokenLabel, usdLabel } from './register'
+import { duration, jpyLabel, limitLabel, modelLabel, parseRate, tokenLabel, usdLabel } from './register'
 
 test('モデル名と時間を日本語で表す', async () => {
   expect(modelLabel('claude-opus-5-5')).toBe('Opus 5.5')
@@ -44,4 +44,14 @@ test('トークン・料金・利用枠を日本語で表す', async () => {
   expect(usdLabel(0.004)).toBe('$0.004')
   expect(limitLabel('five_hour')).toBe('5時間')
   expect(limitLabel('other')).toBe('other')
+})
+
+test('ドルを円に換算して表す', async () => {
+  expect(jpyLabel(0.54, 158.23)).toBe('約85円')
+  expect(jpyLabel(12.5, 158.23)).toBe('約1,978円')
+  expect(jpyLabel(0.003, 158.23)).toBe('1円未満')
+  expect(jpyLabel(0, 158.23)).toBe('約0円')
+  expect(parseRate('{"amount":1.0,"base":"USD","date":"2026-10-07","rates":{"JPY":158.23}}')).toEqual({ rate: 158.23, date: '2026-10-07' })
+  expect(parseRate('{"rates":{}}')).toBeNull()
+  expect(parseRate('not json')).toBeNull()
 })
