@@ -1,6 +1,6 @@
 {
   "name": "jp-display",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "スピナーや操作ヒントなど Claude Code の英語表示を日本語にする",
   "author": {
     "name": "hptukurou0101"
